@@ -79,4 +79,26 @@ class ExaItem: UIView, JZForceViewItemProtocol {
             print(itemData)
         }
     }
+    func itemDepth() -> Int {
+        return self.calculateDepth()
+    }
+    
+    /// 计算深度
+    private func calculateDepth()->Int {
+        let treeNode = self
+        if treeNode.children.count != 0 {
+            
+            var maxCollection: [Int] = []
+            for element in treeNode.children {
+                maxCollection.append(element.calculateDepth())
+            }
+            
+            var result = maxCollection.max() ?? 0
+            result = result + 1
+            
+            return result
+        } else {
+            return 1
+        }
+    }
 }

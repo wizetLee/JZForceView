@@ -15,25 +15,34 @@ protocol JZForceViewItemProtocol {
     func itemChildren() -> [JZForceViewItemProtocol]
     func itemData() -> Any?
     func itemClickedAction(itemData: Any?)
+    func itemDepth() -> Int
 }
 
+//TODO: 增加缩放手势
 
 /// 改自： https://github.com/conradev/Force
 /// https://observablehq.com/@d3/force-directed-tree
 class JZForceView: UIView {
-    private var scrollView: UIScrollView = UIScrollView()
+    private var scrollView: JZForceViewScrollView = JZForceViewScrollView()
+    
+    private var contentView: UIView = UIView()
     
     private let VPcenter: Center<ViewParticle> = Center(.zero)
     
     private let manyParticle: ManyParticle<ViewParticle> = ManyParticle()
     
     private let links: Links<ViewParticle> = Links()
+    
+    private var rootData: JZForceViewItemProtocol? = nil
+    
+    private var pinchGesture: UIPinchGestureRecognizer? = nil
+    
     private lazy var linkLayer: CAShapeLayer = {
         let linkLayer = CAShapeLayer()
         linkLayer.strokeColor = UIColor.gray.cgColor
         linkLayer.fillColor = UIColor.clear.cgColor
         linkLayer.lineWidth = 2
-        self.scrollView.layer.insertSublayer(linkLayer, at: 0)
+        self.contentView.layer.insertSublayer(linkLayer, at: 0)
         return linkLayer
     }()
     
@@ -56,6 +65,11 @@ class JZForceView: UIView {
         self.scrollView.topAnchor.constraint(equalTo: self.topAnchor).isActive = true
         self.scrollView.rightAnchor.constraint(equalTo: self.rightAnchor).isActive = true
         self.scrollView.bottomAnchor.constraint(equalTo: self.bottomAnchor).isActive = true
+        
+        self.contentView.backgroundColor = .clear
+        self.scrollView.addSubview(self.contentView)
+        
+        self.pinchEnable(enable: true)
     }
     
     required init?(coder: NSCoder) {
@@ -65,84 +79,61 @@ class JZForceView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         linkLayer.frame = self.bounds
-    }
-    
-    
-    ///通过模型修改当前的数据
-    func update(data: JZForceViewItemProtocol) {
-        
-        let subViews = scrollView.subviews
-        for element in subViews {
-            element.removeFromSuperview()
-        }
-        
-        let root = self.particle(data: data)
-        self.buildRelationship(data: data, parent: root)
+        self.contentView.frame = self.bounds
         
         
-        var minY: CGFloat? = nil
-        var minX: CGFloat? = nil
-        var maxY: CGFloat? = nil
-        var maxX: CGFloat? = nil
-        
-        // 修正contentSize以及offset
-        simulation.calPositions()
-        for element in simulation.particles {
-            if let tmp = minY {
-                if tmp > element.position.y {
-                    minY = element.position.y
-                }
-            } else {
-                minY = element.position.y
-            }
-            
-            if let tmp = minX {
-                if tmp > element.position.x {
-                    minX = element.position.x
-                }
-            } else {
-                minX = element.position.x
-            }
-            
-            if let tmp = maxY {
-                if tmp < element.position.y {
-                    maxY = element.position.y
-                }
-            } else {
-                maxY = element.position.y
-            }
-            
-            if let tmp = maxX {
-                if tmp < element.position.x {
-                    maxX = element.position.x
-                }
-            } else {
-                maxX = element.position.x
-            }
-        }
-        if let minY = minY, let maxY = maxY, let minX = minX, let maxX = maxX {
-            let cX = max((maxX - minX) , self.bounds.midX)
-            let cY = max((maxY - minY) , self.bounds.midY)
-            //FIXME: 这个是写了一个比较大的范围，并非是精确的
-            let c = max(cX, cY) + 30.0;
-            VPcenter.center = CGPoint(x: c, y: c)
-            self.scrollView.contentSize = .init(width: c * 2, height: c * 2)
+        // 设置滑动范围
+        if let root = rootData {
+            let width = CGFloat(root.itemDepth()) * 150 * 2.0 + CGFloat(root.itemDepth() - 1 >= 0 ? root.itemDepth() - 1 : 0) * 50
+            VPcenter.center = CGPoint(x: width / 2.0, y: width / 2.0)
+            self.scrollView.contentSize = .init(width: width, height: width)
+            self.contentView.frame = .init(x: 0.0, y: 0.0, width: self.scrollView.contentSize.width, height: self.scrollView.contentSize.height)
             let offset: CGPoint = .init(x: max(VPcenter.center.x - (self.bounds.width / 2.0), 0), y: max(VPcenter.center.y - (self.bounds.height / 2.0), 0))
             self.scrollView.setContentOffset(offset, animated: false)
-        } else {
-            VPcenter.center = CGPoint(x: self.bounds.midX, y: self.bounds.midY)
-            self.scrollView.contentSize = self.bounds.size
         }
     }
+    
+    private var minimumPinchScale: CGFloat = 0.3
+    private var pinchScale: CGFloat = 0.0
+    private var lastPinchScale: CGFloat = 0.0
+    @objc private func pinchAction(sender: UIPinchGestureRecognizer) {
+        if lastPinchScale > 0 {
+            if lastPinchScale - sender.scale > 0 {
+                pinchScale -= 0.0075
+            } else {
+                pinchScale += 0.0075
+            }
+            
+            if pinchScale <= -0.5 {
+                pinchScale = -0.5
+            } else if pinchScale >= 1.0 {
+                pinchScale = 1.0
+            }
+        }
+        
+        lastPinchScale = sender.scale
+        if minimumPinchScale <= pinchScale {
+            pinchScale = minimumPinchScale
+        }
+        
+        if (sender.state == UIGestureRecognizer.State.ended
+            || sender.state == UIGestureRecognizer.State.failed
+            || sender.state == UIGestureRecognizer.State.cancelled) {
+            lastPinchScale = 0
+        }
+        
+        self.contentView.transform = CGAffineTransform.init(scaleX: 1 + pinchScale, y: 1 + pinchScale)
+    }
+    
     
     private func buildRelationship(data: JZForceViewItemProtocol, parent: ViewParticle) {
         let distance: CGFloat = {
             if data.itemChildren().count  < 5 {
-                return 60
-            } else if data.itemChildren().count < 10 {
-                return 80
-            } else {
                 return 100
+            } else if data.itemChildren().count < 10 {
+                return 120
+            } else {
+                return 150.0
             }
         }()
         for element in data.itemChildren() {
@@ -154,12 +145,14 @@ class JZForceView: UIView {
     
     private func particle(data: JZForceViewItemProtocol) -> ViewParticle {
         let view = JZForceItemView()
-        view.center = CGPoint(x: CGFloat(arc4random_uniform(320)), y: -CGFloat(arc4random_uniform(100)))
+//        view.center = CGPoint(x: CGFloat(arc4random_uniform(320)), y: -CGFloat(arc4random_uniform(100)))
+        // 隐藏初始的位置
+        view.center = .init(x: -200, y: -200)
         let wh = data.itemSize()
         
         let inset: CGFloat = 15.0
         view.bounds = CGRect(x: 0, y: 0, width: wh.width + inset * 2, height: wh.height + inset * 2)
-        self.scrollView.addSubview(view)
+        self.contentView.addSubview(view)
         
         let gestureRecogizer = UIPanGestureRecognizer(target: self, action: #selector(dragged(_:)))
         view.addGestureRecognizer(gestureRecogizer)
@@ -189,20 +182,73 @@ class JZForceView: UIView {
     @objc private func dragged(_ gestureRecognizer: UIPanGestureRecognizer) {
         guard let view = gestureRecognizer.view, let index = simulation.particles.firstIndex(of: ViewParticle(view: view)) else { return }
         var particle = simulation.particles[index]
+        
+        
         switch gestureRecognizer.state {
         case .began:
             particle.fixed = true
         case .changed:
-            //FIXME: 存在优化空间，可优化滑动效果
-            particle.position = gestureRecognizer.location(in: self.scrollView)
+            var point = gestureRecognizer.translation(in: self)
+            if let viewCenter = gestureRecognizer.view?.center {
+                point.x = point.x + viewCenter.x
+                point.y = point.y + viewCenter.y
+            }
+            particle.position = point
+            //            particle.position = gestureRecognizer.location(in: self.contentView)
             simulation.kick()
-        case .cancelled, .ended:
+            
+            gestureRecognizer.setTranslation(.zero, in: self.contentView);
+        case .cancelled, .ended, .failed:
             particle.fixed = false
-            particle.velocity += gestureRecognizer.velocity(in: self.scrollView) * 0.05
+            particle.velocity += gestureRecognizer.velocity(in: self.contentView) * 0.05
         default:
             break
         }
         simulation.particles.update(with: particle)
+    }
+    
+    
+
+     //MARK: public
+     ///通过模型修改当前的数据
+     public func update(data: JZForceViewItemProtocol) {
+         self.rootData = data
+         
+         let subViews = contentView.subviews
+         for element in subViews {
+             element.removeFromSuperview()
+         }
+         
+         let root = self.particle(data: data)
+         self.buildRelationship(data: data, parent: root)
+         
+     }
+     
+    public func pinchEnable(enable: Bool) {
+         if pinchGesture == nil {
+             
+             pinchGesture = UIPinchGestureRecognizer.init(target: self, action: #selector(pinchAction(sender:)))
+             self.contentView.addGestureRecognizer(pinchGesture!)
+         }
+         pinchGesture?.isEnabled = enable
+     }
+}
+
+
+class JZForceViewScrollView: UIScrollView {
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        return self.jz_gestureRecognizer(gestureRecognizer, shouldRecognizeSimultaneouslyWith: otherGestureRecognizer)
+    }
+    
+    func jz_gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        if otherGestureRecognizer.state == .began || otherGestureRecognizer.state == .possible {
+            if let classForCoder = otherGestureRecognizer.view?.classForCoder
+                , "UILayoutContainerView" == "\(classForCoder)" {
+                self.panGestureRecognizer.require(toFail: otherGestureRecognizer)
+                return true
+            }
+        }
+        return false
     }
 }
 

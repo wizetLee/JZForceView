@@ -86,6 +86,7 @@ public class Simulation<T: Particle> {
             force(alpha, &particles)
         }
         
+        // location
         for var particle in particles {
             if particle.fixed {
                 particle.velocity = .zero
@@ -96,10 +97,12 @@ public class Simulation<T: Particle> {
             particles.update(with: particle)
         }
         
+        // view
         for particle in particles {
             particle.tick()
         }
         
+        // line
         for tick in ticks {
             tick(&particles)
         }
