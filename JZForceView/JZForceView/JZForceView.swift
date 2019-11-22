@@ -18,8 +18,6 @@ protocol JZForceViewItemProtocol {
     func itemDepth() -> Int
 }
 
-//TODO: 增加缩放手势
-
 /// 改自： https://github.com/conradev/Force
 /// https://observablehq.com/@d3/force-directed-tree
 class JZForceView: UIView {
